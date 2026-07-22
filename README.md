@@ -7,7 +7,7 @@ API wykorzystujące Agenta AI do analizy zgłoszeń i automatycznego kierowania 
 - Python 3.12
 - FastAPI
 - Pydantic AI
-- Ollama
+- Ollama (obraz `alpine/ollama` — lekka wersja CPU-only)
 - MailHog
 - Docker Compose
 
@@ -16,7 +16,7 @@ API wykorzystujące Agenta AI do analizy zgłoszeń i automatycznego kierowania 
 Projekt składa się z trzech serwisów:
 
 - **api** – aplikacja FastAPI udostępniająca endpoint REST oraz dokumentację Swagger.
-- **ollama** – lokalny model LLM wykorzystywany przez Agenta.
+- **ollama** – lokalny model LLM wykorzystywany przez Agenta. Wykorzystujemy obraz `alpine/ollama` zamiast oficjalnego `ollama/ollama`, ponieważ jest znacznie lżejszy (rozwiązanie działa wyłącznie na CPU, co jest zgodne z wymaganiami zadania).
 - **mailhog** – lokalny serwer SMTP służący do testowania wysyłki wiadomości e-mail.
 
 Agent analizuje treść zgłoszenia, wybiera odpowiedni dział i wywołuje funkcję odpowiedzialną za wysłanie wiadomości e-mail.
@@ -27,7 +27,15 @@ Agent analizuje treść zgłoszenia, wybiera odpowiedni dział i wywołuje funkc
 docker compose up -d
 ```
 
-Po uruchomieniu dostępne są:
+Po uruchomieniu kontenerów należy jednorazowo pobrać model LLM do kontenera Ollama (obraz nie zawiera domyślnie żadnych wag):
+
+```bash
+docker exec -it ollama ollama pull qwen2.5:0.5b
+```
+
+Wybrano lekki model `qwen2.5:0.5b` (~400MB), ponieważ zadanie klasyfikacji krótkich wiadomości do jednego z 5 działów nie wymaga dużego modelu, a znacznie przyspiesza to działanie na CPU.
+
+Dostępne są wtedy:
 
 | Adres                             | Opis          |
 | --------------------------------- | ------------- |
@@ -64,15 +72,21 @@ curl -X POST http://localhost:8000/api/v1/support \
    docker compose up -d
    ```
 
-2. Wyślij przykładowe żądanie.
+2. Pobierz model do Ollamy (jednorazowo):
 
-3. Otwórz MailHog:
+   ```bash
+   docker exec -it ollama ollama pull qwen2.5:0.5b
+   ```
+
+3. Wyślij przykładowe żądanie.
+
+4. Otwórz MailHog:
 
    ```
    http://localhost:8025
    ```
 
-4. Sprawdź, czy:
+5. Sprawdź, czy:
    - wiadomość została wysłana,
    - odbiorca jest poprawnym działem,
    - nagłówek `Reply-To` zawiera adres nadawcy.
