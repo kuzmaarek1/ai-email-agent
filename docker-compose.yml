@@ -12,18 +12,40 @@ services:
       SMTP_PASSWORD: ""
       SMTP_FROM: noreply@example.com
     depends_on:
-      - ollama
-      - mailhog
+      ollama:
+        condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
+      mailhog:
+        condition: service_started
     restart: unless-stopped
 
   ollama:
-    image: alpine/ollama:latest
+    image: ollama/ollama:latest
     container_name: ollama
     ports:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ollama-init:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint:
+      [
+        "/bin/sh",
+        "-c",
+        "OLLAMA_HOST=http://ollama:11434 ollama pull qwen2.5:0.5b",
+      ]
+    restart: "no"
 
   mailhog:
     image: mailhog/mailhog:latest

@@ -6,17 +6,18 @@ API wykorzystujace Agenta AI do analizy zgloszen i automatycznego kierowania wia
 
 - Python 3.12
 - FastAPI
-- Pydantic AI
-- Ollama (obraz `alpine/ollama` - lekka wersja CPU-only)
+- LangChain (langchain-ollama)
+- Ollama (obraz `ollama/ollama`)
 - MailHog
 - Docker Compose
 
 ## Architektura
 
-Projekt sklada sie z trzech serwisow:
+Projekt sklada sie z czterech serwisow:
 
 - **api** - aplikacja FastAPI udostepniajaca endpoint REST oraz dokumentacje Swagger.
-- **ollama** - lokalny model LLM wykorzystywany przez Agenta. Wykorzystujemy obraz `alpine/ollama` zamiast oficjalnego `ollama/ollama`, poniewaz jest znacznie lzejszy (rozwiazanie dziala wylacznie na CPU, co jest zgodne z wymaganiami zadania).
+- **ollama** - lokalny model LLM wykorzystywany przez Agenta. Wykorzystujemy oficjalny obraz `ollama/ollama`, dziala w trybie CPU-only (bez sekcji GPU w konfiguracji), co jest zgodne z wymaganiami zadania.
+- **ollama-init** - jednorazowy serwis inicjujacy, ktory automatycznie pobiera wagi modelu przy pierwszym uruchomieniu srodowiska (`ollama pull`). Konczy dzialanie po pobraniu modelu; `api` czeka na jego pomyslne zakonczenie (`service_completed_successfully`) zanim wystartuje.
 - **mailhog** - lokalny serwer SMTP sluzacy do testowania wysylki wiadomosci e-mail.
 
 Agent analizuje tresc zgloszenia, wybiera odpowiedni dzial i wywoluje funkcje odpowiedzialna za wyslanie wiadomosci e-mail.
@@ -27,11 +28,7 @@ Agent analizuje tresc zgloszenia, wybiera odpowiedni dzial i wywoluje funkcje od
 docker compose up -d
 ```
 
-Po uruchomieniu kontenerow nalezy jednorazowo pobrac model LLM do kontenera Ollama (obraz nie zawiera domyslnie zadnych wag):
-
-```bash
-docker exec -it ollama ollama pull qwen2.5:0.5b
-```
+Srodowisko uruchamia sie w pelni automatycznie: kontener `ollama` startuje, healthcheck potwierdza jego gotowosc, serwis `ollama-init` pobiera wagi modelu (`qwen2.5:0.5b`, ~400MB), a dopiero po jego pomyslnym zakonczeniu startuje `api`. Nie sa wymagane zadne dodatkowe komendy - po `docker compose up -d` srodowisko jest w pelni gotowe do przyjmowania requestow.
 
 Wybrano lekki model `qwen2.5:0.5b` (~400MB), poniewaz zadanie klasyfikacji krotkich wiadomosci do jednego z 5 dzialow nie wymaga duzego modelu, a znacznie przyspiesza to dzialanie na CPU.
 
@@ -74,21 +71,15 @@ curl -X POST http://localhost:8000/api/v1/support \
    docker compose up -d
    ```
 
-2. Pobierz model do Ollamy (jednorazowo):
+2. Wyslij przykladowe zadanie.
 
-   ```bash
-   docker exec -it ollama ollama pull qwen2.5:0.5b
-   ```
-
-3. Wyslij przykladowe zadanie.
-
-4. Otworz MailHog:
+3. Otworz MailHog:
 
    ```
    http://localhost:8025
    ```
 
-5. Sprawdz, czy:
+4. Sprawdz, czy:
    - wiadomosc zostala wyslana,
    - odbiorca jest poprawnym dzialem,
    - naglowek `Reply-To` zawiera adres nadawcy.
@@ -101,7 +92,7 @@ curl -X POST http://localhost:8000/api/v1/support \
 │   ├── __init__.py
 │   ├── main.py       # endpoint FastAPI + konfiguracja Swagger
 │   ├── models.py     # modele Pydantic (request/response)
-│   ├── agent.py       # Agent AI (pydantic-ai + Ollama) z tool callingiem
+│   ├── agent.py       # Agent AI (LangChain + Ollama) z tool callingiem
 │   └── mailer.py      # wysylka e-maili przez SMTP (MailHog)
 ├── Dockerfile
 ├── docker-compose.yml
