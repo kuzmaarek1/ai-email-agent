@@ -43,7 +43,7 @@ services:
       [
         "/bin/sh",
         "-c",
-        "OLLAMA_HOST=http://ollama:11434 ollama pull qwen2.5:0.5b",
+        "OLLAMA_HOST=http://ollama:11434 ollama pull qwen2.5:1.5b",
       ]
     restart: "no"
 
