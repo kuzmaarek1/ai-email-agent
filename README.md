@@ -21,17 +21,7 @@ Projekt sklada sie z czterech serwisow:
 - **ollama-init** - jednorazowy serwis inicjujacy, ktory automatycznie pobiera wagi modelu przy pierwszym uruchomieniu srodowiska (`ollama pull`). Konczy dzialanie po pobraniu modelu; `api` czeka na jego pomyslne zakonczenie (`service_completed_successfully`) zanim wystartuje.
 - **mailhog** - lokalny serwer SMTP sluzacy do testowania wysylki wiadomosci e-mail.
 
-Agent analizuje tresc zgloszenia i decyduje, do jakiego dzialu ja skierowac (model zwraca ustrukturyzowana decyzje w formacie JSON, wymuszonym przez Ollame - `format="json"`), a nastepnie kod wywoluje dedykowane narzedzie (tool) odpowiedzialne za wyslanie wiadomosci e-mail.
-
-Odpowiedz modelu jest walidowana przez Pydantic (`Literal` ograniczajacy dozwolone adresy dzialow) - jesli model zwroci niepoprawny lub nieznany adres, zgloszenie trafia bezpiecznie do fallbacku `other@example.com` zamiast przerywac dzialanie API bledem.
-
-### Decyzja architektoniczna: sposob wywolania tool/function calling
-
-Pierwotna implementacja korzystala z natywnego mechanizmu `bind_tools()` w LangChain, w ktorym to model samodzielnie decyduje, czy i kiedy wywolac narzedzie (`tool_calls`). W testach na lokalnych, malych modelach (Ollama, CPU) mechanizm ten okazal sie niewystarczajaco niezawodny - model czesto w ogole nie wywolywal narzedzia (odpowiadal samym tekstem), a w niektorych przypadkach generowal odpowiedz w nieskonczonosc, nie konczac zadania.
-
-Aby zapewnic powtarzalne, poprawne dzialanie PoC, zastosowano nastepujace podejscie: model zwraca wylacznie ustrukturyzowana decyzje (`department_email`) w formacie JSON, ktorego poprawnosc jest gramatycznie wymuszana przez Ollame (`format="json"`) - to duzo bardziej niezawodny mechanizm niz poleganie na tym, czy model "zdecyduje sie" wywolac narzedzie. Na podstawie tej decyzji **kod aplikacji wywoluje dedykowane narzedzie** `send_department_email` (zdefiniowane przez dekorator `@tool` z LangChain), ktore faktycznie wysyla e-mail.
-
-Agent w dalszym ciagu w pelni odpowiada za analize tresci zgloszenia i decyzje o dziale docelowym - jedyna zmiana dotyczy mechanizmu przekazania tej decyzji do wywolania narzedzia (ustrukturyzowany JSON zamiast natywnego `tool_calls`). Przy uzyciu wiekszych modeli (np. hostowanych w chmurze, nie lokalnie na CPU) natywny `tool_calls` dzialalby dla tej samej logiki biznesowej bez zmian w pozostalej czesci kodu - zmianie ulegloby jedynie kilka linii w `agent.py`.
+Agent dostaje narzedzie `send_department_email` poprzez natywny mechanizm `bind_tools()` z LangChain i **sam decyduje**, czy i z jakimi argumentami je wywolac (prawdziwy tool/function calling - `response.tool_calls`). To jest glowna sciezka dzialania aplikacji, zgodnie z wymogiem zadania. Szczegoly dotyczace niezawodnosci tego mechanizmu na malych, lokalnych modelach oraz zastosowanej sciezki zapasowej opisano w sekcji **Uwagi / znane ograniczenia**.
 
 ## Uruchomienie
 
@@ -39,9 +29,9 @@ Agent w dalszym ciagu w pelni odpowiada za analize tresci zgloszenia i decyzje o
 docker compose up -d
 ```
 
-Srodowisko uruchamia sie w pelni automatycznie: kontener `ollama` startuje, healthcheck potwierdza jego gotowosc, serwis `ollama-init` pobiera wagi modelu (`qwen2.5:1.5b`, ~1GB), a dopiero po jego pomyslnym zakonczeniu startuje `api`. Nie sa wymagane zadne dodatkowe komendy - po `docker compose up -d` srodowisko jest w pelni gotowe do przyjmowania requestow (pierwsze uruchomienie potrwa dluzej ze wzgledu na pobieranie obrazu i modelu).
+Srodowisko uruchamia sie w pelni automatycznie: kontener `ollama` startuje, healthcheck potwierdza jego gotowosc, serwis `ollama-init` pobiera wagi modelu, a dopiero po jego pomyslnym zakonczeniu startuje `api`. Nie sa wymagane zadne dodatkowe komendy - po `docker compose up -d` srodowisko jest w pelni gotowe do przyjmowania requestow (pierwsze uruchomienie potrwa dluzej ze wzgledu na pobieranie obrazu i modelu).
 
-Wybrano model `qwen2.5:1.5b` (~1GB) jako kompromis miedzy szybkoscia dzialania na CPU a niezawodnoscia klasyfikacji zgloszen.
+Wybrano model `qwen2.5:1.5b` (~1GB) jako kompromis miedzy szybkoscia dzialania na CPU a rozmiarem obrazu. Model ten technicznie wspiera tool calling w Ollamie, jednak przy tak malym rozmiarze bywa niestabilny (stad opisana wyzej sciezka zapasowa). Jesli priorytetem jest wyzsza niezawodnosc natywnego `tool_calls` kosztem wiekszego pobrania i wolniejszego CPU inference, warto podmienic model na `qwen2.5:7b-instruct` lub `qwen3:4b` (zmiana w jednym miejscu - `ollama-init` w `docker-compose.yml` oraz zmienna `OLLAMA_MODEL`).
 
 Dostepne sa wtedy:
 
@@ -108,7 +98,7 @@ curl.exe -X POST http://localhost:8000/api/v1/support -H "Content-Type: applicat
 >    }
 >    ```
 > 5. Kliknij niebieski przycisk **"Execute"**.
-> 6. Wynik zobaczysz nizej w sekcji "Server response" - kod `200` oraz "Response body" z `department_email`.
+> 6. Wynik zobaczysz nizej w sekcji "Server response" - kod `200` oraz "Response body" z `department_email` i `routing_method`.
 > 7. Sprawdz MailHog (`http://localhost:8025`), czy pojawila sie tam nowa wiadomosc.
 
 ## Przykladowa odpowiedz
@@ -116,9 +106,12 @@ curl.exe -X POST http://localhost:8000/api/v1/support -H "Content-Type: applicat
 ```json
 {
   "status": "success",
-  "department_email": "it@example.com"
+  "department_email": "it@example.com",
+  "routing_method": "tool_calls"
 }
 ```
+
+Pole `routing_method` przyjmuje wartosc `"tool_calls"`, gdy model sam wywolal narzedzie (oczekiwana sciezka), lub `"fallback"`, gdy zadzialala sciezka zapasowa opisana w sekcji Uwagi / znane ograniczenia.
 
 ## Testowanie
 
@@ -140,6 +133,7 @@ curl.exe -X POST http://localhost:8000/api/v1/support -H "Content-Type: applicat
    - wiadomosc zostala wyslana,
    - odbiorca jest poprawnym dzialem,
    - naglowek `Reply-To` zawiera adres nadawcy.
+   - w odpowiedzi API pole `routing_method` ma wartosc `"tool_calls"` (potwierdza to, ze zadanie zostalo obsluzone przez natywny tool/function calling modelu, zgodnie z wymogiem zadania).
 
 ## Struktura projektu
 
@@ -156,3 +150,15 @@ curl.exe -X POST http://localhost:8000/api/v1/support -H "Content-Type: applicat
 ├── requirements.txt
 └── README.md
 ```
+
+## Uwagi / znane ograniczenia
+
+Zgodnie z wymogiem zadania, glowna sciezka aplikacji opiera sie na natywnym mechanizmie `bind_tools()` z LangChain, w ktorym model samodzielnie decyduje, czy i kiedy wywolac narzedzie `send_department_email` (`tool_calls`). Kod aplikacji jedynie odczytuje te decyzje i wysyla e-mail, nie podejmujac za model decyzji o docelowym dziale.
+
+W testach na malym, lokalnym modelu (Ollama, CPU) mechanizm ten bywal niewystarczajaco niezawodny - model czasem nie wywolywal narzedzia, tylko odpowiadal samym tekstem. Na taki wypadek dodano sciezke zapasowa: jesli pierwsza proba nie zwroci `tool_calls`, wykonywane jest drugie wywolanie modelu z wymuszonym `format="json"`, sluzace juz wylacznie do klasyfikacji, a kod na tej podstawie recznie wywoluje narzedzie. Niepoprawna lub nieznana decyzja modelu (w kazdej sciezce) trafia do bezpiecznego fallbacku `other@example.com` (walidacja Pydantic `Literal`).
+
+Odpowiedz API zawiera pole `routing_method` (`"tool_calls"` lub `"fallback"`), ktore jednoznacznie pokazuje, ktora sciezka obsluzyla dane zgloszenie - bez zagladania w logi.
+
+Domyslny model to `qwen2.5:1.5b` - wybrany ze wzgledu na maly rozmiar i szybkie uruchomienie PoC, kosztem wiekszej podatnosci na fallback. Przy wiekszym modelu (np. `qwen2.5:7b-instruct` lub `qwen3:4b`) `tool_calls` dzialalby bardziej niezawodnie - zmiana ograniczylaby sie do podmiany nazwy modelu w `docker-compose.yml` i `OLLAMA_MODEL`.
+
+Pozostale uwarunkowania: system dziala CPU-only (zgodnie z wymaganiami), co oznacza wolniejsza inferencje; Agent ma dostep tylko do jednego narzedzia, co upraszcza klasyfikacje dla malego modelu.
