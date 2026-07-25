@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from app.agent import classify_message
+from app.agent import route_message
 from app.models import SupportRequest
 
 app = FastAPI(
@@ -17,12 +17,16 @@ async def root():
 @app.post("/api/v1/support")
 async def submit_support_request(payload: SupportRequest):
     """
-    Endpoint klasyfikuje zgłoszenie przy pomocy Agenta AI i zwraca dział docelowy.
-    Wysyłka e-maila zostanie podłączona w kolejnym etapie.
+    Przyjmuje zgłoszenie użytkownika, przekazuje je do Agenta AI,
+    który klasyfikuje treść i wysyła e-mail do odpowiedniego działu.
     """
-    department_email = await classify_message(payload.message)
+    department_email = await route_message(
+        sender_email=payload.email,
+        message=payload.message,
+        subject=payload.subject,
+    )
 
     return {
-        "received_email": payload.email,
+        "status": "success",
         "department_email": department_email,
     }
