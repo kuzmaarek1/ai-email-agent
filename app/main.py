@@ -1,21 +1,15 @@
 from fastapi import FastAPI
 
 from app.agent import route_message
-from app.models import SupportRequest
+from app.models import SupportRequest, SupportResponse
 
 app = FastAPI(
     title="AI Support API",
     docs_url="/api/v1/docs",
 )
 
-
-@app.get("/")
-async def root():
-    return {"message": "Hello World"}
-
-
-@app.post("/api/v1/support")
-async def submit_support_request(payload: SupportRequest):
+@app.post("/api/v1/support", response_model=SupportResponse)
+async def submit_support_request(payload: SupportRequest) -> SupportResponse:
     """
     Przyjmuje zgłoszenie użytkownika, przekazuje je do Agenta AI,
     który klasyfikuje treść i wysyła e-mail do odpowiedniego działu.
@@ -26,7 +20,7 @@ async def submit_support_request(payload: SupportRequest):
         subject=payload.subject,
     )
 
-    return {
-        "status": "success",
-        "department_email": department_email,
-    }
+    return SupportResponse(
+        status="success",
+        department_email=department_email,
+    )
