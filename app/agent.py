@@ -19,7 +19,7 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b")
 # Zabezpieczenie na wypadek gdyby model "zapetlil sie" i nie skonczyl
 # generowania (obserwowane w testach na malych, lokalnych modelach). Bez
 # timeoutu request wisialby w nieskonczonosc.
-LLM_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "30"))
+LLM_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "120"))
 
 # Lista dostepnych dzialow, do ktorych agent moze kierowac zgloszenia
 DEPARTMENTS = {
